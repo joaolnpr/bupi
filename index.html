@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BUPI — Visualização de Terrenos (RGG)</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/shpjs@4.0.4/dist/shp.min.js"></script>
+<style>
+  :root{
+    --ink:#1c2430;
+    --ink-2:#2a3444;
+    --paper:#f3f1ec;
+    --paper-2:#ffffff;
+    --line:#d8d3c6;
+    --amber:#b5822a;
+    --ok:#3f7a5a;
+    --err:#a63c3c;
+    --mono:"IBM Plex Mono","SFMono-Regular",Menlo,Consolas,monospace;
+    --sans:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;font-family:var(--sans);background:var(--paper);color:var(--ink);}
+  #app{display:flex;height:100vh;width:100vw;}
+
+  /* ---- sidebar ---- */
+  #sidebar{
+    width:340px;min-width:340px;
+    background:var(--ink);
+    color:#e7e4db;
+    display:flex;flex-direction:column;
+    border-right:1px solid #0e1319;
+  }
+  #sidebar header{
+    padding:18px 18px 14px;
+    border-bottom:1px solid #34404f;
+  }
+  #sidebar header .eyebrow{
+    font-family:var(--mono);
+    font-size:11px;
+    color:#8fa0b5;
+    letter-spacing:.02em;
+  }
+  #sidebar header h1{
+    font-size:18px;
+    margin:4px 0 2px;
+    font-weight:600;
+    letter-spacing:-0.01em;
+  }
+  #sidebar header p{
+    margin:0;
+    font-size:12.5px;
+    color:#9aa6b5;
+    line-height:1.5;
+  }
+
+  .load-zone{
+    margin:16px 18px 10px;
+    padding:14px;
+    border:1px dashed #4a5768;
+    border-radius:6px;
+    background:#212a37;
+  }
+  .load-zone p{margin:0 0 10px;font-size:12.5px;color:#aab5c2;line-height:1.5;}
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;
+    width:100%;
+    background:var(--amber);
+    color:#1c1305;
+    font-weight:600;
+    font-size:13px;
+    border:none;
+    border-radius:5px;
+    padding:9px 12px;
+    cursor:pointer;
+    margin-bottom:8px;
+    font-family:var(--sans);
+    transition:filter .12s ease;
+  }
+  .btn:hover{filter:brightness(1.08);}
+  .btn.secondary{
+    background:transparent;
+    color:#cdd6e0;
+    border:1px solid #4a5768;
+    font-weight:500;
+  }
+  .btn.secondary:hover{background:#2a3444;}
+  input[type=file]{display:none;}
+
+  #layer-list{
+    flex:1;
+    overflow-y:auto;
+    padding:6px 12px 12px;
+  }
+  .empty-state{
+    padding:24px 12px;
+    text-align:center;
+    color:#6b7789;
+    font-size:12.5px;
+    line-height:1.6;
+  }
+  .layer-item{
+    background:#212a37;
+    border:1px solid #34404f;
+    border-radius:6px;
+    padding:10px 12px;
+    margin-bottom:8px;
+  }
+  .layer-item .row1{
+    display:flex;align-items:center;gap:8px;
+  }
+  .swatch{
+    width:12px;height:12px;border-radius:3px;flex:none;
+    box-shadow:0 0 0 1px rgba(255,255,255,.15) inset;
+  }
+  .layer-name{
+    font-family:var(--mono);
+    font-size:12px;
+    color:#e7e4db;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    flex:1;
+  }
+  .layer-meta{
+    font-size:11px;
+    color:#8b96a6;
+    margin:6px 0 8px 20px;
+    line-height:1.5;
+  }
+  .layer-actions{
+    display:flex;gap:6px;margin-left:20px;flex-wrap:wrap;
+  }
+  .icon-btn{
+    background:none;border:1px solid #4a5768;color:#aab5c2;
+    border-radius:4px;font-size:11px;padding:4px 8px;cursor:pointer;
+    font-family:var(--sans);
+  }
+  .icon-btn:hover{background:#2a3444;color:#fff;}
+  .icon-btn.danger:hover{border-color:var(--err);color:#e08a8a;}
+  .layer-item.error{border-color:var(--err);}
+  .layer-item.error .layer-meta{color:#e08a8a;}
+
+  #sidebar footer{
+    padding:12px 18px;
+    border-top:1px solid #34404f;
+    font-size:11px;
+    color:#6b7789;
+    font-family:var(--mono);
+  }
+
+  /* ---- map ---- */
+  #map-wrap{flex:1;position:relative;}
+  #map{height:100%;width:100%;background:#dfe3e6;}
+
+  #basemap-toggle{
+    position:absolute;top:14px;right:14px;z-index:1000;
+    background:var(--paper-2);
+    border:1px solid var(--line);
+    border-radius:6px;
+    display:flex;
+    overflow:hidden;
+    box-shadow:0 2px 6px rgba(0,0,0,.12);
+  }
+  #basemap-toggle button{
+    border:none;background:transparent;padding:8px 12px;
+    font-size:12px;font-family:var(--sans);color:var(--ink-2);cursor:pointer;
+  }
+  #basemap-toggle button.active{background:var(--ink);color:#fff;}
+
+  .leaflet-popup-content-wrapper{border-radius:6px;}
+  .popup-title{
+    font-family:var(--mono);font-size:12px;color:var(--amber);
+    margin:0 0 6px;font-weight:600;
+  }
+  .popup-table{border-collapse:collapse;font-size:12px;}
+  .popup-table td{padding:2px 8px 2px 0;vertical-align:top;}
+  .popup-table td.k{color:#667;font-family:var(--mono);white-space:nowrap;}
+  .popup-table td.v{color:var(--ink);}
+
+  #btn-locate{
+    position:absolute;top:14px;right:14px;z-index:1000;
+    background:var(--paper-2);color:var(--ink-2);
+    border:1px solid var(--line);border-radius:6px;
+    padding:8px 12px;font-size:12px;font-family:var(--sans);
+    cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.12);
+  }
+  #btn-locate:hover{background:#f0ede4;}
+  #btn-locate.active{background:var(--ink);color:#fff;}
+
+  #drop-overlay{
+    position:absolute;inset:0;z-index:2000;
+    background:rgba(28,36,48,.85);
+    display:none;align-items:center;justify-content:center;
+    color:#fff;font-size:16px;font-family:var(--mono);
+    border:3px dashed var(--amber);
+  }
+  #drop-overlay.active{display:flex;}
+
+  #tile-warning{
+    display:none;
+    position:absolute;bottom:14px;left:14px;right:14px;z-index:1000;
+    background:#a63c3c;color:#fff;
+    font-size:12.5px;font-family:var(--sans);
+    padding:10px 14px;border-radius:6px;
+    box-shadow:0 2px 8px rgba(0,0,0,.25);
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="sidebar">
+    <header>
+      <div class="eyebrow">BUPI · RGG</div>
+      <h1>Visualização de Terrenos</h1>
+      <p>Carrega os .zip do registo (ex.: RGG_20260921...) exportados do BUPI e vê os teus terrenos sobrepostos no mapa. Tudo processado localmente, no browser.</p>
+    </header>
+
+    <div class="load-zone">
+      <p>Podes selecionar a pasta inteira (só os .zip são lidos) ou escolher ficheiros .zip individuais.</p>
+      <button class="btn" id="btn-folder">📁 Selecionar pasta</button>
+      <button class="btn secondary" id="btn-files">🗂 Selecionar ficheiros .zip</button>
+      <input type="file" id="input-folder" webkitdirectory directory multiple>
+      <input type="file" id="input-files" accept=".zip" multiple>
+    </div>
+
+    <div id="layer-list">
+      <div class="empty-state" id="empty-state">Ainda sem terrenos carregados.<br>Usa um dos botões acima para começar.</div>
+    </div>
+
+    <div style="padding:10px 18px;border-top:1px solid #34404f;">
+      <button class="btn secondary" id="btn-gmaps-all" style="margin-bottom:0;">Abrir todos no Google Maps ↗</button>
+    </div>
+
+    <footer id="footer-status">0 terrenos carregados</footer>
+  </div>
+
+  <div id="map-wrap">
+    <div id="map"></div>
+    <button id="btn-locate" title="Mostrar a minha localização">📍 A minha localização</button>
+    <div id="drop-overlay">Larga os ficheiros .zip aqui</div>
+    <div id="tile-warning"></div>
+  </div>
+</div>
+
+<script>
+// ---------- map setup ----------
+const map = L.map('map', { zoomControl: true }).setView([39.6, -7.9], 8); // Castelo Branco região aprox.
+
+const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 19,
+  attribution: 'Tiles &copy; Esri'
+}).addTo(map);
+
+// visible warning if the current base layer's tiles fail to load
+const tileWarning = document.getElementById('tile-warning');
+function watchTileErrors(layer, label){
+  let loaded = 0, failed = 0;
+  layer.on('tileload', () => { loaded++; tileWarning.style.display = 'none'; });
+  layer.on('tileerror', () => {
+    failed++;
+    if(failed >= 4 && loaded === 0 && map.hasLayer(layer)){
+      tileWarning.textContent = `Não foi possível carregar as tiles de "${label}". Verifica a ligação à internet.`;
+      tileWarning.style.display = 'block';
+    }
+  });
+}
+watchTileErrors(sat, 'Satélite');
+
+// ---------- user location (live tracking toggle) ----------
+const locateBtn = document.getElementById('btn-locate');
+let watchId = null, locMarker = null, locCircle = null, firstFix = true;
+
+function stopLocate(){
+  if(watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+  if(locMarker){ map.removeLayer(locMarker); locMarker = null; }
+  if(locCircle){ map.removeLayer(locCircle); locCircle = null; }
+  locateBtn.classList.remove('active');
+  locateBtn.textContent = '📍 A minha localização';
+}
+
+function showBanner(msg){
+  tileWarning.textContent = msg;
+  tileWarning.style.display = 'block';
+  setTimeout(() => { tileWarning.style.display = 'none'; }, 9000);
+}
+
+function onFix(pos){
+  const ll = [pos.coords.latitude, pos.coords.longitude];
+  const acc = pos.coords.accuracy;
+  if(!locMarker){
+    locMarker = L.circleMarker(ll, { radius:9, color:'#fff', weight:3, fillColor:'#1a73e8', fillOpacity:1 }).addTo(map);
+    locCircle = L.circle(ll, { radius:acc, color:'#1a73e8', weight:1, fillColor:'#1a73e8', fillOpacity:0.12 }).addTo(map);
+  } else {
+    locMarker.setLatLng(ll);
+    locCircle.setLatLng(ll).setRadius(acc);
+  }
+  locMarker.bindPopup(`Estás aqui<br>Precisão: ~${Math.round(acc)} m`);
+  if(firstFix){
+    firstFix = false;
+    map.setView(ll, Math.max(map.getZoom(), 17));
+  }
+  locateBtn.classList.add('active');
+  locateBtn.textContent = '📍 A seguir (toca para parar)';
+}
+
+function onLocErr(err){
+  stopLocate();
+  const msgs = {
+    1: 'Localização negada. No iPhone: Definições → Privacidade e Segurança → Serviços de Localização → permitir para esta app/browser.',
+    2: 'Não foi possível determinar a localização.',
+    3: 'Tempo esgotado a obter a localização.'
+  };
+  showBanner(msgs[err.code] || 'Erro de geolocalização.');
+}
+
+locateBtn.onclick = () => {
+  if(watchId !== null){ stopLocate(); return; }
+  if(!navigator.geolocation){
+    showBanner('Este browser não suporta geolocalização.');
+    return;
+  }
+  if(window.isSecureContext === false){
+    showBanner('O iOS bloqueia a localização em ficheiros locais (file://). É preciso abrir a página por um endereço https://.');
+    return;
+  }
+  firstFix = true;
+  locateBtn.textContent = '📍 A localizar…';
+  // no callback at all after 12s usually means the browser silently blocked the request
+  const silent = setTimeout(() => {
+    if(firstFix){
+      stopLocate();
+      showBanner('Sem resposta da localização. O iOS costuma bloquear isto em ficheiros locais — abre a página por https:// ou permite a localização nas definições.');
+    }
+  }, 12000);
+  watchId = navigator.geolocation.watchPosition(
+    (pos) => { clearTimeout(silent); onFix(pos); },
+    (err) => { clearTimeout(silent); onLocErr(err); },
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
+  );
+};
+
+// palette rotation for distinguishing parcels
+const PALETTE = ['#b5822a','#3f6f8a','#5f8a3f','#8a4f6f','#3f8a7a','#8a6f3f','#6f5f8a','#8a3f3f'];
+let colorIdx = 0;
+let layerSeq = 0;
+const layers = {}; // id -> { name, leafletLayer, color, count, group }
+
+const layerListEl = document.getElementById('layer-list');
+const emptyStateEl = document.getElementById('empty-state');
+const footerEl = document.getElementById('footer-status');
+
+function updateFooter(){
+  const total = Object.values(layers).reduce((s,l)=> s + (l.count||0), 0);
+  const files = Object.keys(layers).length;
+  footerEl.textContent = `${total} terreno(s) · ${files} ficheiro(s)`;
+}
+
+function fmtKey(k){ return k.replace(/_/g,' '); }
+
+function buildPopup(props, fileName){
+  const rows = Object.entries(props || {})
+    .filter(([k,v]) => v !== null && v !== undefined && v !== '')
+    .map(([k,v]) => `<tr><td class="k">${fmtKey(k)}</td><td class="v">${v}</td></tr>`)
+    .join('');
+  return `<div class="popup-title">${fileName}</div><table class="popup-table">${rows || '<tr><td class="v">Sem atributos</td></tr>'}</table>`;
+}
+
+function addLayerItem(id, name){
+  emptyStateEl.style.display = 'none';
+  const color = '#ffffff';
+  const el = document.createElement('div');
+  el.className = 'layer-item';
+  el.id = 'item-' + id;
+  el.innerHTML = `
+    <div class="row1">
+      <span class="swatch" style="background:${color}"></span>
+      <span class="layer-name" title="${name}">${name}</span>
+    </div>
+    <div class="layer-meta" id="meta-${id}">a carregar…</div>
+    <div class="layer-actions">
+      <button class="icon-btn" data-action="zoom" data-id="${id}">Zoom</button>
+      <button class="icon-btn" data-action="gmaps" data-id="${id}">Google Maps ↗</button>
+      <button class="icon-btn" data-action="toggle" data-id="${id}">Ocultar</button>
+      <button class="icon-btn danger" data-action="remove" data-id="${id}">Remover</button>
+    </div>
+  `;
+  layerListEl.appendChild(el);
+  return color;
+}
+
+layerListEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.icon-btn');
+  if(!btn) return;
+  const id = btn.dataset.id;
+  const rec = layers[id];
+  if(!rec) return;
+  const action = btn.dataset.action;
+  if(action === 'zoom'){
+    const b = rec.leafletLayer.getBounds();
+    if(b.isValid()) map.fitBounds(b, { padding:[30,30] });
+  } else if(action === 'gmaps'){
+    const b = rec.leafletLayer.getBounds();
+    if(b.isValid()){
+      const c = b.getCenter();
+      const url = `https://www.google.com/maps/place/${c.lat},${c.lng}/@${c.lat},${c.lng},19z`;
+      window.open(url, '_blank');
+    }
+  } else if(action === 'toggle'){
+    if(map.hasLayer(rec.leafletLayer)){
+      map.removeLayer(rec.leafletLayer);
+      btn.textContent = 'Mostrar';
+    } else {
+      map.addLayer(rec.leafletLayer);
+      btn.textContent = 'Ocultar';
+    }
+  } else if(action === 'remove'){
+    map.removeLayer(rec.leafletLayer);
+    delete layers[id];
+    document.getElementById('item-'+id).remove();
+    if(Object.keys(layers).length === 0) emptyStateEl.style.display = 'block';
+    updateFooter();
+  }
+});
+
+function fitAll(){
+  const group = Object.values(layers).map(l => l.leafletLayer).filter(l => l.getBounds && l.getBounds().isValid());
+  if(group.length === 0) return;
+  const fg = L.featureGroup(group);
+  map.fitBounds(fg.getBounds(), { padding:[30,30] });
+}
+
+async function loadZipFile(file){
+  const id = 'l' + (layerSeq++);
+  const color = addLayerItem(id, file.name);
+  const metaEl = document.getElementById('meta-' + id);
+  try{
+    const buf = await file.arrayBuffer();
+    const geojson = await shp(buf);
+    // shpjs can return a FeatureCollection or an array of them (multiple layers in one zip)
+    const fc = Array.isArray(geojson) ? { type:'FeatureCollection', features: geojson.flatMap(g => g.features) } : geojson;
+    const count = (fc.features || []).length;
+
+    const leafletLayer = L.geoJSON(fc, {
+      style: { color: '#ffffff', weight: 4, fillColor: '#ffffff', fillOpacity: 0.08 },
+      pointToLayer: (feat, latlng) => L.circleMarker(latlng, { radius:6, color:'#ffffff', fillColor:'#ffffff', fillOpacity:0.6 }),
+      onEachFeature: (feat, lyr) => {
+        lyr.bindPopup(buildPopup(feat.properties, file.name));
+      }
+    }).addTo(map);
+
+    layers[id] = { name: file.name, leafletLayer, color, count };
+    metaEl.textContent = `${count} terreno(s) / fração(ões)`;
+    updateFooter();
+    fitAll();
+  } catch(err){
+    console.error('Erro a processar', file.name, err);
+    document.getElementById('item-' + id).classList.add('error');
+    metaEl.textContent = 'Erro ao ler o shapefile — verifica se o .zip contém .shp/.dbf/.prj válidos';
+  }
+}
+
+function handleFileList(fileList){
+  const zips = Array.from(fileList).filter(f => f.name.toLowerCase().endsWith('.zip'));
+  zips.forEach(loadZipFile);
+  if(zips.length === 0){
+    alert('Nenhum ficheiro .zip encontrado na seleção.');
+  }
+}
+
+document.getElementById('btn-folder').onclick = () => document.getElementById('input-folder').click();
+document.getElementById('btn-gmaps-all').onclick = () => {
+  const ids = Object.keys(layers);
+  if(ids.length === 0){
+    alert('Ainda não carregaste nenhum terreno.');
+    return;
+  }
+  const points = ids
+    .map(id => layers[id].leafletLayer.getBounds())
+    .filter(b => b.isValid())
+    .map(b => { const c = b.getCenter(); return `${c.lat},${c.lng}`; });
+  const url = 'https://www.google.com/maps/dir/' + points.join('/');
+  window.open(url, '_blank');
+};
+document.getElementById('btn-files').onclick = () => document.getElementById('input-files').click();
+document.getElementById('input-folder').addEventListener('change', e => handleFileList(e.target.files));
+document.getElementById('input-files').addEventListener('change', e => handleFileList(e.target.files));
+
+// drag & drop support
+const dropOverlay = document.getElementById('drop-overlay');
+let dragCounter = 0;
+['dragenter','dragover'].forEach(evt => {
+  document.addEventListener(evt, e => {
+    e.preventDefault();
+    dragCounter++;
+    dropOverlay.classList.add('active');
+  });
+});
+['dragleave','drop'].forEach(evt => {
+  document.addEventListener(evt, e => {
+    e.preventDefault();
+    if(evt === 'dragleave'){
+      dragCounter--;
+      if(dragCounter <= 0) dropOverlay.classList.remove('active');
+    } else {
+      dragCounter = 0;
+      dropOverlay.classList.remove('active');
+    }
+  });
+});
+document.addEventListener('drop', e => {
+  if(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length){
+    handleFileList(e.dataTransfer.files);
+  }
+});
+</script>
+</body>
+</html>
